@@ -44,7 +44,7 @@ AES-128-CBC using the common key as the AES key and the title ID in big endian
 plus zero padding as the IV: For example, the IV for title ID 0004001b00010002
 is `0004001B000100020000000000000000`.
 
-**Licensing:**
+## Licensing
 
 This software is licensed under the terms of the ISC License.  
 You can find a copy of the license in the LICENSE file.
