@@ -1,0 +1,4 @@
+CC=gcc
+CFLAGS=-g -O0 -Wall -Wextra -pedantic -std=c99 -fPIC
+LDFLAGS= -lcurl -lgcrypt
+
