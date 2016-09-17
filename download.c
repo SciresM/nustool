@@ -15,10 +15,10 @@
 #include "types.h"
 #include "util.h"
 
-#ifdef __linux__ 
-    #define CURL_INIT_VARS CURL_GLOBAL_NOTHING
-#elif _WIN32
+#ifdef _WIN32
     #define CURL_INIT_VARS CURL_GLOBAL_WIN32
+#else
+    #define CURL_INIT_VARS CURL_GLOBAL_NOTHING
 #endif
 
 static CURL *curl;
