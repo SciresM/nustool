@@ -404,32 +404,13 @@ static inline const byte *get_common_key_from_tid(uint64_t titleid)
 	return NULL;
 }
 
-static errno_t parse_cetk(void)
+static errno_t decrypt_titlekey(void)
 {
-	uint32_t sigtype = ((uint32_t)cetk[0] << 24) | ((uint32_t)cetk[1] << 16)
-		| ((uint32_t)cetk[2] << 8) | cetk[3];
-	ssize_t offset;
 	gcry_error_t gerr;
 	gcry_cipher_hd_t cipher;
 	const byte *common_key;
 	byte iv[16];
-
-	if ((offset = bytes_to_skip_for_signature(sigtype)) == -1) {
-		err("Error: Unknown signature type %" PRIx32, sigtype);
-		return -1;
-	}
-
-	/* Account for the initial four bytes used for the signature type. */
-	offset += 4;
-
-	/* The Wii and DSi use earlier versions of the Ticket schema, but the
-	 * parts we care about are in the same positions.
-	 */
-	if (cetk[offset + 0x7c] > 0x1) {
-		err("Warning: Unknown ticket version %" PRIu8 ", aborting.",
-				tmd[offset + 0x40]);
-		return -1;
-	}
+	uint64_t bits;
 
 	if ((gerr = gcry_cipher_open(&cipher, GCRY_CIPHER_AES128,
 					GCRY_CIPHER_MODE_CBC, 0)) != 0) {
@@ -451,7 +432,10 @@ static errno_t parse_cetk(void)
 
 	memset(iv, 0, sizeof(iv));
 	/* Title ID in big endian */
-	memcpy(iv, cetk + offset + 0x9c, sizeof(opts.titleid));
+	for (size_t i = 0; i < sizeof(opts.titleid); ++i) {
+		bits = (8 * (sizeof(opts.titleid) - 1 - i));
+		iv[i] = (opts.titleid & (0xFFLLU << bits)) >> bits;
+	}
 
 	if ((gerr = gcry_cipher_setiv(cipher, iv, sizeof(iv))) != 0) {
 		err("Unable to set IV: %s", gcry_strerror(gerr));
@@ -460,16 +444,51 @@ static errno_t parse_cetk(void)
 	}
 
 	if ((gerr = gcry_cipher_decrypt(cipher, opts.key, sizeof(opts.key),
-					cetk + offset + 0x7f, sizeof(opts.key)))
+					NULL, 0))
 			!= 0) {
 		err("Unable to decrypt titlekey: %s", gcry_strerror(gerr));
 		gcry_cipher_close(cipher);
 		return -1;
 	}
 
-	opts.flags |= OPT_HAS_KEY;
-
 	gcry_cipher_close(cipher);
+
+	opts.flags |= OPT_HAS_KEY;
+	opts.flags &= ~OPT_KEY_ENCRYPTED;
+
+	return 0;
+}
+
+static errno_t parse_cetk(void)
+{
+	uint32_t sigtype = ((uint32_t)cetk[0] << 24) | ((uint32_t)cetk[1] << 16)
+		| ((uint32_t)cetk[2] << 8) | cetk[3];
+	ssize_t offset;
+	uint64_t titleid;
+
+	if ((offset = bytes_to_skip_for_signature(sigtype)) == -1) {
+		err("Error: Unknown signature type %" PRIx32, sigtype);
+		return -1;
+	}
+
+	/* Account for the initial four bytes used for the signature type. */
+	offset += 4;
+
+	/* The Wii and DSi use earlier versions of the Ticket schema, but the
+	 * parts we care about are in the same positions.
+	 */
+	if (cetk[offset + 0x7c] > 0x1) {
+		err("Warning: Unknown ticket version %" PRIu8 ", aborting.",
+				cetk[offset + 0x7c]);
+		return -1;
+	}
+
+	for (size_t i = 0; i < sizeof(titleid); ++i)
+		titleid |= (uint64_t)(cetk[offset + 0x9c +
+				sizeof(titleid) - 1 - i]) << (8 * i);
+
+	opts.titleid = titleid;
+	memcpy(opts.key, cetk + offset + 0x7f, sizeof(opts.key));
 
 	return 0;
 }
@@ -1183,6 +1202,11 @@ errno_t download_title(void)
 
 	if (opts.flags & OPT_DECRYPT_FROM_CETK) {
 		if ((ret = download_cetk()) != 0)
+			return ret;
+	}
+
+	if (opts.flags & OPT_KEY_ENCRYPTED) {
+		if ((ret = decrypt_titlekey()) != 0)
 			return ret;
 	}
 

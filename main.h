@@ -7,6 +7,7 @@
 #define OPT_HAS_KEY		(1UL << 1)
 #define OPT_HAS_VERSION		(1UL << 2)
 #define OPT_DECRYPT_FROM_CETK	(1UL << 3)
+#define OPT_KEY_ENCRYPTED	(1UL << 4)
 
 struct Options {
 	uint64_t titleid;

@@ -29,24 +29,35 @@ Copy `config.mk.template` to `config.mk` and then run `make`.
 To build under windows, you will need to build [libcurl](https://curl.haxx.se/libcurl/), [libgpgerror](https://www.gnupg.org/(fr)/related_software/libgpg-error/index.html),
 and [libgcrypt](https://www.gnu.org/software/libgcrypt/). I recommend using MinGW.
 
-## Decryption Key
+## Examples
 
-The decryption key must be a *decrypted* titlekey for the title you attempt to
-download.
+### Downloading the raw encrypted contents of title 0004001b00010002
+
+`$ nustool 0004001b00010002`
+
+### Downloading and decrypting a system title
 
 For system titles, you can pass `-c` to have them automatically be decrypted
 using each system's common key. Note that this is not possible for 3DS system
 titles as the required common keyX (or rather, the bootroms) has not yet been
 dumped.
 
-It can be obtained by decrypting the encrypted titlekey from a ticket with
-AES-128-CBC using the common key as the AES key and the title ID in big endian
-plus zero padding as the IV: For example, the IV for title ID 0004001b00010002
-is `0004001B000100020000000000000000`.
+`$ nustool -c 0003000f484e4c45`
+
+### Downloading and decrypting title 0006000012345678 with the encrypted titlekey 0123456789abcdef0123456789abcdef
+
+`$ nustool -K 0123456789abcdef0123456789abcdef 0006000012345678`
+
+### Downloading and decrypting title 0006000012345678 with the decrypted titlekey abcdef0123456789abcdef0123456789
+
+`$ nustool -k abcdef0123456789abcdef0123456789 0006000012345678`
+
+### Downloading and decrypting system title 00030017484e414a, displaying a progress bar for each file, version 1280
+
+`$ nustool -c -p -V 1280 00030017484e414a`
 
 ## Licensing
 
 This software is licensed under the terms of the ISC License.  
 You can find a copy of the license in the LICENSE file.
-
 

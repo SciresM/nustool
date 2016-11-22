@@ -43,7 +43,7 @@ __attribute__((format(printf, 1, 2))) void msg(const char *fmt, ...)
 
 static void usage(const char *name)
 {
-	err("Usage: %s [-c] [-k key] [-p] [-V version] titleid",
+	err("Usage: %s [-c] [-k decrypted_key] [-K encrypted_key] [-p] [-V version] titleid",
 	/* The C standard does not guarantee that argv[0] is non-NULL, but does
 	 * guarantee that argv[argc] is NULL.
 	 *
@@ -59,13 +59,16 @@ static void help(const char *name)
 	err("\nDownloads and optionally decrypts a title from NUS.\n"
 	"\n"
 	" -c              try to decrypt the title using the CETK key\n"
-	" -k [key]        the key to use to decrypt the contents; if not\n"
-	"                 given, the raw encrypted contents will be downloaded\n"
+	" -k [key]        the titlekey to use to decrypt the contents\n"
+	" -K [key]        the encrypted titlekey to use to decrypt the contents\n"
 	" -h              print this help and exit\n"
 	" -p              show progress bars\n"
 	" -v              print nustool version and exit\n"
 	" -V [version]    the version of the title to download; if not given,\n"
 	"                 the latest version will be downloaded\n"
+	"\n"
+	"If none of -c, -k and -K are given, the raw encrypted contents\n"
+	"will be downloaded.\n"
 	"\n"
 	"All files are downloaded into the current directory.");
 }
@@ -197,6 +200,7 @@ static errno_t util_parse_num(const char *str, char flag,
 /* Reinventing getopt because it's unavailable on Windows/Visual Studio. */
 errno_t util_parse_options(int argc, char *argv[])
 {
+	char flag;
 	char *arg;
 	uint64_t num;
 
@@ -215,7 +219,7 @@ errno_t util_parse_options(int argc, char *argv[])
 
 			if (util_parse_num(argv[i], 0, &num, 16,
 						/* Minimum TID on the Wii */
-						0x0001000000000000ULL,
+						0x0000000100000001ULL,
 						/* Maximum theoretical TID */
 						0xFFFFFFFFFFFFFFFFULL) != 0)
 				return -1;
@@ -235,13 +239,33 @@ errno_t util_parse_options(int argc, char *argv[])
 			return -1;
 		}
 
-		switch (*(++argv[i])) {
+		switch (flag = *(++argv[i])) {
 		case 'c':
-			opts.flags |= OPT_DECRYPT_FROM_CETK;
+			if (opts.flags & OPT_HAS_KEY) {
+				err("You cannot specify -k/-K and -c together.");
+				return -1;
+			}
+
+			opts.flags |= (OPT_DECRYPT_FROM_CETK | OPT_KEY_ENCRYPTED);
 			break;
+
+		case 'K':
+			opts.flags |= OPT_KEY_ENCRYPTED;
+			/* fallthrough */
 		case 'k':
+			if (opts.flags & OPT_HAS_KEY) {
+				err("You may only specify one key.");
+				return -1;
+			}
+
+			if (opts.flags & OPT_DECRYPT_FROM_CETK) {
+				err("You cannot specify -k/-K and -c together.");
+				return -1;
+			}
+
 			if (util_get_arg(argc, argv, i, &arg) != 0) {
-				err("Error: No argument given to flag -k.");
+				err("Error: No argument given to flag -%c.",
+						flag);
 				return -1;
 			}
 
@@ -256,9 +280,11 @@ errno_t util_parse_options(int argc, char *argv[])
 			++i;
 
 			break;
+
 		case 'p':
 			opts.flags |= OPT_SHOW_PROGRESS;
 			break;
+
 		case 'V':
 			if (util_get_arg(argc, argv, i, &arg) != 0)
 				return -1;
@@ -277,9 +303,11 @@ errno_t util_parse_options(int argc, char *argv[])
 		case 'v':
 			version();
 			return 1;
+
 		case 'h':
 			help(argv[0]);
 			return 1;
+
 		default:
 			help(argv[0]);
 			return -1;
