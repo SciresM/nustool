@@ -216,6 +216,24 @@ static struct TMDFileFormat tmd_format[] = {
 	}
 };
 
+static errno_t write_file_from_memory(const char *filename,
+		void *data, size_t datalen)
+{
+	FILE *f;
+
+	if ((f = fopen(filename, "wb")) == NULL) {
+		err("Unable to open %s for writing: %s", filename,
+				strerror(errno));
+		return -1;
+	}
+
+	fwrite(data, datalen, 1, f);
+
+	fclose(f);
+
+	return 0;
+}
+
 static errno_t build_contents_list(void)
 {
 	uint32_t sigtype = ((uint32_t)tmd[0] << 24) | ((uint32_t)tmd[1] << 16)
@@ -574,9 +592,6 @@ static errno_t download_cetk()
 	}
 
 	if (ds.flags & DS_ERROR)
-		return -1;
-
-	if (parse_cetk() != 0)
 		return -1;
 
 	return 0;
@@ -1200,8 +1215,22 @@ errno_t download_title(void)
 	if ((ret = download_tmd()) != 0)
 		return ret;
 
-	if (opts.flags & OPT_DECRYPT_FROM_CETK) {
+	if ((opts.flags & OPT_DECRYPT_FROM_CETK)
+			|| (opts.flags & OPT_KEEP_META)) {
 		if ((ret = download_cetk()) != 0)
+			return ret;
+	}
+
+	if (opts.flags & OPT_DECRYPT_FROM_CETK) {
+		if ((ret = parse_cetk()) != 0)
+			return -1;
+	}
+
+	if (opts.flags & OPT_KEEP_META) {
+		if ((ret = write_file_from_memory("tmd", tmd, tmdsize)) != 0)
+			return ret;
+
+		if ((ret = write_file_from_memory("cetk", cetk, cetksize)) != 0)
 			return ret;
 	}
 

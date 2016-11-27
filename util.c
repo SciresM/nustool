@@ -43,7 +43,7 @@ __attribute__((format(printf, 1, 2))) void msg(const char *fmt, ...)
 
 static void usage(const char *name)
 {
-	err("Usage: %s [-c] [-k decrypted_key] [-K encrypted_key] [-p] [-V version] titleid",
+	err("Usage: %s [-c] [-k decrypted_key] [-K encrypted_key] [-m] [-p] [-V version] titleid",
 	/* The C standard does not guarantee that argv[0] is non-NULL, but does
 	 * guarantee that argv[argc] is NULL.
 	 *
@@ -62,6 +62,7 @@ static void help(const char *name)
 	" -k [key]        the titlekey to use to decrypt the contents\n"
 	" -K [key]        the encrypted titlekey to use to decrypt the contents\n"
 	" -h              print this help and exit\n"
+	" -m              keep meta files (cetk, tmd); usable with make_cdn_cia\n"
 	" -p              show progress bars\n"
 	" -v              print nustool version and exit\n"
 	" -V [version]    the version of the title to download; if not given,\n"
@@ -279,6 +280,10 @@ errno_t util_parse_options(int argc, char *argv[])
 			opts.flags |= OPT_HAS_KEY;
 			++i;
 
+			break;
+
+		case 'm':
+			opts.flags |= OPT_KEEP_META;
 			break;
 
 		case 'p':
