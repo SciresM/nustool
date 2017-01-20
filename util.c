@@ -150,19 +150,6 @@ const char *util_print_hex(const byte bytes[], size_t length, char *out)
 	return out;
 }
 
-static errno_t util_get_arg(int argc, char *argv[], int i,
-		char **arg)
-{
-	if (i + 1 >= argc) {
-		err("Option %c requires an argument.", *argv[i]);
-		return -1;
-	}
-
-	*arg = argv[i + 1];
-
-	return 0;
-}
-
 static errno_t util_parse_num(const char *str, char flag,
 		uint64_t *num, int base,
 		uint64_t min, uint64_t max)
@@ -200,11 +187,10 @@ static errno_t util_parse_num(const char *str, char flag,
 	return 0;
 }
 
-/* Reinventing getopt because it's unavailable on Windows/Visual Studio. */
 errno_t util_parse_options(int argc, char *argv[])
 {
-	char flag;
-	char *arg;
+	const char *progname = argv[0];
+	int flag;
 	uint64_t num;
 
 	/* Set default options */
@@ -213,36 +199,8 @@ errno_t util_parse_options(int argc, char *argv[])
 	/* Invalid titleid for verification if it's been set */
 	opts.titleid = 0xFFFFFFFFFFFFFFFFULL;
 
-	for (int i = 1; i < argc; ++i) {
-		if (*argv[i] != '-') {
-			if (opts.titleid != 0xFFFFFFFFFFFFFFFFULL) {
-				err("Error: Multiple titleids given.");
-				return -1;
-			}
-
-			if (util_parse_num(argv[i], 0, &num, 16,
-						/* Minimum TID on the Wii */
-						0x0000000100000001ULL,
-						/* Maximum theoretical TID */
-						0xFFFFFFFFFFFFFFFFULL) != 0)
-				return -1;
-
-			opts.titleid = num;
-			continue;
-		}
-
-		if (argv[i][1] == '\0') {
-			err("Error: \"-\" is not a valid flag.");
-			return -1;
-		}
-
-		if (argv[i][2] != '\0') {
-			err("Error: Combined options like \"-Vp 1024\" are not "
-					"supported (try -h for help).");
-			return -1;
-		}
-
-		switch (flag = *(++argv[i])) {
+	while ((flag = getopt(argc, argv, "ck:K:mprV:")) != -1) {
+		switch (flag) {
 		case 'c':
 			if (opts.flags & OPT_HAS_KEY) {
 				err("You cannot specify -k/-K and -c together.");
@@ -266,21 +224,13 @@ errno_t util_parse_options(int argc, char *argv[])
 				return -1;
 			}
 
-			if (util_get_arg(argc, argv, i, &arg) != 0) {
-				err("Error: No argument given to flag -%c.",
-						flag);
-				return -1;
-			}
-
-			if (util_parse_hex(arg, opts.key, sizeof(opts.key))
+			if (util_parse_hex(optarg, opts.key, sizeof(opts.key))
 					!= 0) {
-				err("Error: Unable to parse key %s.",
-						argv[i + 1]);
+				err("Error: Unable to parse key %s.", optarg);
 				return -1;
 			}
 
 			opts.flags |= OPT_HAS_KEY;
-			++i;
 
 			break;
 
@@ -297,14 +247,9 @@ errno_t util_parse_options(int argc, char *argv[])
 			break;
 
 		case 'V':
-			if (util_get_arg(argc, argv, i, &arg) != 0)
+			if (util_parse_num(optarg, (char)flag, &num, 0, 0,
+						0xFFFFU) != 0)
 				return -1;
-
-			if (util_parse_num(arg, *argv[i], &num, 0, 0, 0xFFFFU)
-					!= 0)
-				return -1;
-
-			++i;
 
 			opts.flags |= OPT_HAS_VERSION;
 			opts.version = (uint16_t)num;
@@ -319,21 +264,30 @@ errno_t util_parse_options(int argc, char *argv[])
 			help(argv[0]);
 			return 1;
 
-		default:
+		case '?':
+			err("Error: Unknown flag or missing flag argument.");
 			help(argv[0]);
 			return -1;
 		}
 	}
 
-	if (opts.titleid == 0xFFFFFFFFFFFFFFFF) {
-		if (argv[argc] == NULL) {
-			err("Error: No title ID given.");
-			help(argv[0]);
-		} else {
-			err("Invalid titleid: %" PRIu64, opts.titleid);
-		}
+	argc -= optind;
+	argv += optind;
+
+	if (argv[0] == NULL) {
+		err("Error: No title ID given.");
+		help(progname);
 		return -1;
 	}
+
+	if (util_parse_num(argv[0], 0, &num, 16,
+				/* Minimum TID on the Wii */
+				0x0000000100000001ULL,
+				/* Maximum theoretical TID */
+				0xFFFFFFFFFFFFFFFFULL) != 0)
+		return -1;
+
+	opts.titleid = num;
 
 	return 0;
 }

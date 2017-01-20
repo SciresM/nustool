@@ -1,7 +1,7 @@
 #ifndef NUSTOOL_VERSION_H
 #define NUSTOOL_VERSION_H
 
-#define NUSTOOL_VERSION	"1.0"
+#define NUSTOOL_VERSION	"1.1"
 
 #endif
 

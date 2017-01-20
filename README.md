@@ -59,7 +59,7 @@ dumped.
 
 ### Downloading and decrypting system title 00030017484e414a, displaying a progress bar for each file, version 1280
 
-`$ nustool -c -p -V 1280 00030017484e414a`
+`$ nustool -cpV 1280 00030017484e414a`
 
 ## Licensing
 
