@@ -17,6 +17,10 @@
 errno_t download_title(void);
 
 #define DS_ERROR	(1UL << 31)
+/* Do not write to file; switch CBC mode to encrypt. Used to restore state from
+ * an aborted download.
+ */
+#define DS_RESUMING	(1UL << 30)
 
 #define TYPE_ENCRYPTED		(1U <<  0)
 /* aka type "disc" */

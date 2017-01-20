@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -43,7 +44,7 @@ __attribute__((format(printf, 1, 2))) void msg(const char *fmt, ...)
 
 static void usage(const char *name)
 {
-	err("Usage: %s [-c] [-k decrypted_key] [-K encrypted_key] [-m] [-p] [-V version] titleid",
+	err("Usage: %s [-cmpr] [-k decrypted_key] [-K encrypted_key] [-V version] titleid",
 	/* The C standard does not guarantee that argv[0] is non-NULL, but does
 	 * guarantee that argv[argc] is NULL.
 	 *
@@ -64,6 +65,7 @@ static void help(const char *name)
 	" -h              print this help and exit\n"
 	" -m              keep meta files (cetk, tmd); usable with make_cdn_cia\n"
 	" -p              show progress bars\n"
+	" -r              resume download\n"
 	" -v              print nustool version and exit\n"
 	" -V [version]    the version of the title to download; if not given,\n"
 	"                 the latest version will be downloaded\n"
@@ -290,6 +292,10 @@ errno_t util_parse_options(int argc, char *argv[])
 			opts.flags |= OPT_SHOW_PROGRESS;
 			break;
 
+		case 'r':
+			opts.flags |= OPT_RESUME;
+			break;
+
 		case 'V':
 			if (util_get_arg(argc, argv, i, &arg) != 0)
 				return -1;
@@ -320,12 +326,27 @@ errno_t util_parse_options(int argc, char *argv[])
 	}
 
 	if (opts.titleid == 0xFFFFFFFFFFFFFFFF) {
-		if (argv[argc] == NULL)
+		if (argv[argc] == NULL) {
+			err("Error: No title ID given.");
 			help(argv[0]);
-		else
+		} else {
 			err("Invalid titleid: %" PRIu64, opts.titleid);
+		}
 		return -1;
 	}
+
+	return 0;
+}
+
+errno_t util_create_file(const char *path)
+{
+	int fd;
+
+	if ((fd = open(path, O_WRONLY | O_CREAT, 0644)) == -1)
+		return -1;
+
+	if (close(fd) != 0)
+		return -1;
 
 	return 0;
 }
@@ -343,5 +364,15 @@ errno_t util_get_file_size(const char *path, uint64_t *size)
 	*size = (uint64_t)buf.st_size;
 
 	return 0;
+}
+
+uint8_t util_get_msb64(uint64_t i)
+{
+	uint8_t msb = 0;
+
+	while (i >>= 1)
+		++msb;
+
+	return msb;
 }
 

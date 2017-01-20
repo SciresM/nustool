@@ -9,6 +9,7 @@
 #define OPT_DECRYPT_FROM_CETK	(1UL << 3)
 #define OPT_KEY_ENCRYPTED	(1UL << 4)
 #define OPT_KEEP_META		(1UL << 5)
+#define OPT_RESUME		(1UL << 6)
 
 struct Options {
 	uint64_t titleid;

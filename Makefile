@@ -26,7 +26,7 @@ dist:
 		| cut -d'	' -f2 \
 		| sed -e 's/"//g'))
 	mkdir nustool-$(NUSTOOLVER)
-	cp *.c *.h config.mk Makefile README.md nustool-$(NUSTOOLVER)
+	cp *.c *.h config.mk Makefile README.md LICENSE nustool-$(NUSTOOLVER)
 	tar czf nustool-$(NUSTOOLVER).tar.gz nustool-$(NUSTOOLVER)
 	rm -r nustool-$(NUSTOOLVER)
 

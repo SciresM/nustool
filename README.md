@@ -6,7 +6,7 @@ Servers (NUS).
 ## Usage
 
 ```
-Usage: ./nustool [-c] [-k key] [-m] [-p] [-V version] titleid
+Usage: nustool [-cmpr] [-k decrypted_key] [-K encrypted_key] [-V version] titleid
 
 Downloads and optionally decrypts a title from NUS.
 
@@ -16,6 +16,7 @@ Downloads and optionally decrypts a title from NUS.
  -h              print this help and exit
  -m              keep meta files (cetk, tmd); usable with make_cdn_cia
  -p              show progress bars
+ -r              resume download
  -v              print nustool version and exit
  -V [version]    the version of the title to download; if not given,
                  the latest version will be downloaded

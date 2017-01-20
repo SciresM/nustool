@@ -482,7 +482,7 @@ static errno_t parse_cetk(void)
 	uint32_t sigtype = ((uint32_t)cetk[0] << 24) | ((uint32_t)cetk[1] << 16)
 		| ((uint32_t)cetk[2] << 8) | cetk[3];
 	ssize_t offset;
-	uint64_t titleid;
+	uint64_t titleid = 0;
 
 	if ((offset = bytes_to_skip_for_signature(sigtype)) == -1) {
 		err("Error: Unknown signature type %" PRIx32, sigtype);
@@ -554,7 +554,7 @@ static size_t download_cetk_cb(char *ptr, size_t size, size_t nmemb,
 	return datalen;
 }
 
-static errno_t download_cetk()
+static errno_t download_cetk(void)
 {
 	struct DownloadState ds = {.flags = 0};
 	CURLcode code;
@@ -611,10 +611,32 @@ static errno_t download_contents_cb_simple_crypto(
 	static byte cbcbuf[16] = {0};
 	static size_t cbcbuflen = 0;
 
+	/* If we are reading state from a partial file, do not re-apply
+	 * the decryption step (or we'll actually break the hash!),
+	 * only fill the hasher.
+	 *
+	 * However, because the CDN encryption uses AES in CBC mode, we need to
+	 * set the IV to match the state we've been downloading if we're
+	 * decrypting.
+	 *
+	 * In CBC decryption, the previous *ciphertext* is xored with the
+	 * current AES plaintext. Since we've written plaintext, we need to
+	 * re-encrypt everything up to this point to obtain the current IV.
+	 */
+	gcry_error_t (*cipher_func)(gcry_cipher_hd_t h, void *out,
+			size_t outsize, const void *in, size_t inlen) =
+		(ds->flags & DS_RESUMING
+			? gcry_cipher_encrypt
+			: gcry_cipher_decrypt);
+
 	/* If we have leftover block data:
 	 * - Append as much as is missing.
 	 * - Decrypt that.
 	 * - Write that first.
+	 *
+	 * This cannot happen when reading state back from a partially
+	 * downloaded file since we only write to file when we have a complete
+	 * AES block already.
 	 */
 	if (cbcbuflen != 0) {
 		/* Do we have enough data to fill the cbcbuf?
@@ -679,27 +701,49 @@ static errno_t download_contents_cb_simple_crypto(
 	if (dcc->datalen == 0)
 		return 0;
 
-	if ((gerr = gcry_cipher_decrypt(ds->cipher, dcc->data, dcc->datalen,
-					NULL, 0)) != 0) {
-		err("Unable to decrypt content (%zu bytes): %s",
-				dcc->datalen, gcry_strerror(gerr));
-		return -1;
+	/* If we're downloading and decrypting, we need to *decrypt* in CBC
+	 * mode and feed the decrypted contents to the hasher.
+	 *
+	 * If we're resuming a download, we need to *encrypt* in CBC mode to
+	 * make sure we're continuing from the right IV, but thta breaks
+	 * dcc->data being plaintext, so we need to hash first and then encrypt.
+	 */
+#define HASH() do {\
+	if (ds->bytes_hashed + dcc->datalen > ds->content->size) {\
+		gcry_md_write(ds->hasher, dcc->data,\
+				ds->content->size - ds->bytes_hashed);\
+		dcc->datalen = ds->content->size - ds->bytes_hashed;\
+		ds->bytes_hashed += dcc->datalen;\
+	} else {\
+		gcry_md_write(ds->hasher, dcc->data, dcc->datalen);\
+		ds->bytes_hashed += dcc->datalen;\
+	}\
+} while (0)
+#define CRYPT() do {\
+	if ((gerr = (*cipher_func)(ds->cipher,\
+					dcc->data, dcc->datalen,\
+					NULL, 0)) != 0) {\
+		err("Unable to crypt content (%zu bytes): %s",\
+				dcc->datalen, gcry_strerror(gerr));\
+		return -1;\
+	}\
+} while (0)
+
+	if (ds->flags & DS_RESUMING) {
+		HASH();
+		CRYPT();
+	} else {
+		CRYPT();
+		HASH();
 	}
 
-	if (ds->bytes_hashed + dcc->datalen > ds->content->size) {
-		gcry_md_write(ds->hasher, dcc->data,
-				ds->content->size - ds->bytes_hashed);
-		dcc->datalen = ds->content->size - ds->bytes_hashed;
-		ds->bytes_hashed += dcc->datalen;
-	} else {
-		gcry_md_write(ds->hasher, dcc->data, dcc->datalen);
-		ds->bytes_hashed += dcc->datalen;
-	}
+#undef HASH
+#undef CRYPT
 
 	return 0;
 }
 
-static inline int increase_hn_counter(struct HnCounters *count)
+static inline errno_t increase_hn_counter(struct HnCounters *count)
 {
 	if (++count->h0 == 16) {
 		count->h0 = 0;
@@ -822,7 +866,16 @@ static errno_t download_contents_cb_blockwise_crypto(
 		return 0;
 	}
 
-	/* We have more than or exactly enough data to fill the chunk. */
+	/* We have more than or exactly enough data to fill the chunk.
+	 *
+	 * If resuming, we only need to bump the Hn counters, since the
+	 * encryption is stateless between individual chunks.
+	 */
+	if (dcc->ds->flags & DS_RESUMING) {
+		increase_hn_counter(&dcc->ds->count);
+		return 0;
+	}
+
 	overhang = dcc->datalen + filled - sizeof(chunk);
 
 	memcpy(chunk + filled, dcc->data, dcc->datalen - overhang);
@@ -836,7 +889,8 @@ static errno_t download_contents_cb_blockwise_crypto(
 	filled = overhang;
 	dcc->datalen = 0;
 
-	fwrite(chunk, sizeof(chunk), 1, dcc->ds->f);
+	if (!(dcc->ds->flags & DS_RESUMING))
+		fwrite(chunk, sizeof(chunk), 1, dcc->ds->f);
 
 	return 0;
 }
@@ -863,7 +917,7 @@ static size_t download_contents_cb(char *ptr, size_t size, size_t nmemb,
 		return 0;
 	}
 
-	if ((opts.flags & OPT_HAS_KEY)) {
+	if (opts.flags & OPT_HAS_KEY) {
 		dcc.data = data;
 		dcc.datalen = datalen;
 		dcc.ds = ds;
@@ -877,7 +931,14 @@ static size_t download_contents_cb(char *ptr, size_t size, size_t nmemb,
 
 			return real_datalen;
 		} else {
-			/* XXX: Assuming there's always encryption. */
+			/* XXX: Assuming there's always encryption.
+			 *
+			 * The CDN seems to really only operate with encrypted
+			 * titles, though.
+			 *
+			 * This *may* be different for dev CDN(s), but no such
+			 * thing has been seen in the wild thus far.
+			 */
 			err("Error: Unknown encryption for title.");
 			return 0;
 		}
@@ -889,12 +950,14 @@ static size_t download_contents_cb(char *ptr, size_t size, size_t nmemb,
 	/* We might just be getting the last CBC block, and that was
 	 * handled above. Check we still have things to do.
 	 */
-	if (datalen > 0)
+	if (datalen > 0 && !(ds->flags & DS_RESUMING))
 		fwrite(data, datalen, 1, ds->f);
 
-	if (ferror(ds->f))
+	if (ferror(ds->f)) {
+		err("I/O error when reading/writing file");
 		/* Signals an error to libcurl and aborts the transfer. */
 		return 0;
+	}
 
 	return real_datalen;
 }
@@ -1028,40 +1091,143 @@ static errno_t prepare_crypto_for_download(struct DownloadState *ds)
 	return 0;
 }
 
-static errno_t download_content(struct Content *content,
-		struct DownloadState *ds)
+/* Side effect: Moves the FILE* to the end of file so that appending works
+ * transparently as though a new download had begun.
+ */
+static errno_t read_partial_file_into_state(struct DownloadState *ds)
+{
+	CURLcode code;
+	/* Avoids having to deal with partial chunks for contents using
+	 * blockwise crypto.
+	 */
+	static byte buf[CHUNK_SIZE];
+	size_t bytes_read;
+	size_t filelen;
+	char filename[9];
+
+	snprintf(filename, sizeof(filename), "%08x", ds->content->contentid);
+
+	/* File not being found is *not* okay -- we may have just created it
+	 * with the fopen(..., "w+b") call in download_content().
+	 *
+	 * File being empty, however, is.
+	 */
+	if (util_get_file_size(filename, &filelen) != 0)
+		return -1;
+
+	if (filelen == 0)
+		return 0;
+
+	if (filelen > ds->content->size) {
+		err("Content size (%" PRIu64 ") is greater than size of"
+				" local file (%08" PRIx32 ": %" PRIu64 "."
+				" Broken resume; refusing to continue.",
+				ds->content->size, ds->content->contentid,
+				filelen);
+		return -1;
+	}
+
+	if (filelen == ds->content->size && (opts.flags & OPT_SHOW_PROGRESS)) {
+		msg("Skipping already downloaded content %08" PRIx32 ".",
+				ds->content->contentid);
+		return 1;
+	}
+
+	ds->flags |= DS_RESUMING;
+
+	while ((bytes_read = fread(buf, 1, sizeof(buf), ds->f)) != 0) {
+		/* CURL uses a different return code convention, where a return
+		 * value of less than the total amount of data the function was
+		 * called with signifies an error.
+		 *
+		 * Since we're using our internal download callback function,
+		 * expect this kind of return value here.
+		 */
+		if (download_contents_cb((char *)buf, 1, bytes_read, ds)
+				!= bytes_read)
+			return -1;
+	}
+
+	if (ferror(ds->f)) {
+		err("Reading file failed: %s", strerror(errno));
+		return -1;
+	}
+
+	ds->flags &= ~DS_RESUMING;
+
+	/* Guard against libcurl compiled with < 64-bit curl_off_t if the input
+	 * is beyond that size.
+	 *
+	 * curl_off_t is a signed type and overflowing that is undefined
+	 * behavior.
+	 *
+	 * XXX: We assume in the entire program, top to bottom, that the program
+	 * is running on a machine CHAR_BIT == 8.
+	 *
+	 * There's no macro for the maximum value provided by libcurl, so we'll
+	 * have to work with the size the type (which *is* provided). 8 times
+	 * the size of the type yields the number of bits in the type. We need
+	 * to subtract 2 from that; one because 1 << bit_size is always an
+	 * overflow and another because 1 << (bit_size - 1) is an overflow on
+	 * signed integers, and curl_off_t is a signed type.
+	 */
+	if (8 * CURL_SIZEOF_CURL_OFF_T - 2 <= util_get_msb64(filelen)) {
+		err("File %08" PRIx32 " too large for your platform to resume.",
+				ds->content->contentid);
+		return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE,
+			(curl_off_t)filelen)) != CURLE_OK) {
+		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
+				ds->content->contentid, curlerrstr(code));
+		return -1;
+	}
+
+	if (opts.flags & OPT_SHOW_PROGRESS)
+		msg("Resuming download from byte %" PRIu64 ".", filelen);
+
+	return 0;
+}
+
+static errno_t download_content(struct DownloadState *ds)
 {
 	FILE *f;
 	uint64_t filelen;
 	char filename[9];
 	CURLcode code;
 
-	if ((opts.flags & OPT_HAS_KEY)) {
-		if (prepare_crypto_for_download(ds) != 0)
-			return -1;
-	}
+	snprintf(filename, sizeof(filename), "%08x", ds->content->contentid);
 
-	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
-			get_content_url(content))) != CURLE_OK) {
-		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
-				content->contentid, curlerrstr(code));
+	errno = 0;
+	/* Since r+b won't create the file, but we need the file pointer at the
+	 * beginning of the file, we'll just manually create the file.
+	 */
+	if (util_create_file(filename) != 0) {
+		err("Unable to create file %s: %s", filename, strerror(errno));
 		return -1;
 	}
 
-	snprintf(filename, sizeof(filename), "%08x", content->contentid);
-
 	errno = 0;
-	if ((f = fopen(filename, "wb")) == NULL) {
-		err("Unable to open %s for writing: %s", filename,
+	if ((f = fopen(filename, "r+b")) == NULL) {
+		err("Unable to open %s for reading and writing: %s", filename,
 				strerror(errno));
 		return -1;
 	}
 
 	ds->f = f;
 
-	if (opts.flags & OPT_SHOW_PROGRESS)
-		msg("Downloading content %08" PRIx32 "...",
-				content->contentid);
+	if (opts.flags & OPT_HAS_KEY) {
+		if (prepare_crypto_for_download(ds) != 0)
+			return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
+			get_content_url(ds->content))) != CURLE_OK) {
+		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
+				ds->content->contentid, curlerrstr(code));
+		return -1;
+	}
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_WRITEDATA, ds))
 			!= CURLE_OK) {
@@ -1080,25 +1246,62 @@ static errno_t download_content(struct Content *content,
 		return -1;
 	}
 
+	if (opts.flags & OPT_SHOW_PROGRESS)
+		msg("Downloading content %08" PRIx32 "...",
+				ds->content->contentid);
+
+	/* Restoring download state from file relies on the order of downloading
+	 * being deterministic and no downloads being done in parallel.
+	 *
+	 * Else, this would require a separate loop inside download_contents.
+	 */
+	if (opts.flags & OPT_RESUME) {
+		switch (read_partial_file_into_state(ds)) {
+		/* Download already complete */
+		case 1:
+			return 0;
+
+		/* File partially downloaded; state has been read
+		 * successfully.
+		 */
+		case 0:
+			break;
+
+		/* Some operation failed. */
+		default:
+			return -1;
+		}
+	}
+
 	*errbuf = '\0';
 
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
 		err("curl_easy_perform(%08" PRIx32 "): %s",
-				content->contentid, curlerrstr(code));
+				ds->content->contentid, curlerrstr(code));
 		fclose(f);
+		return -1;
+	}
+
+	/* The number of bytes to resume from persists between individual
+	 * URLs; we need to reset it to 0 after a completed transfer.
+	 */
+	if ((code = curl_easy_setopt(curl, CURLOPT_RESUME_FROM, 0))
+			!= CURLE_OK) {
+		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
+				ds->content->contentid, curlerrstr(code));
 		return -1;
 	}
 
 	fclose(f);
 
 	if (util_get_file_size(filename, &filelen) == 0
-			&& filelen != content->size) {
+			&& filelen != ds->content->size) {
 		err("Warning: File size mismatch (got %" PRIu64
 				" vs. expected %" PRIu64
 				") for content %08" PRIx32,
 				filelen,
-				content->size,
-				content->contentid);
+				ds->content->size,
+				ds->content->contentid);
 	}
 
 	if (ds->flags & DS_ERROR)
@@ -1110,15 +1313,15 @@ static errno_t download_content(struct Content *content,
 	/* TMD SHA-1/hash tree-based verification happened as part of the
 	 * decryption for blockwise crypto contents.
 	 */
-	if (has_simple_crypto(content)) {
+	if (has_simple_crypto(ds->content)) {
 		gcry_md_final(ds->hasher);
 
-		if (memcmp(gcry_md_read(ds->hasher, content->hashalgo),
-					content->hash,
-					gcry_md_get_algo_dlen(content->hashalgo))
+		if (memcmp(gcry_md_read(ds->hasher, ds->content->hashalgo),
+					ds->content->hash,
+					gcry_md_get_algo_dlen(ds->content->hashalgo))
 				!= 0) {
 			err("Error: Hash mismatch for content %08" PRIx32,
-					content->contentid);
+					ds->content->contentid);
 			return -1;
 		}
 	}
@@ -1179,7 +1382,7 @@ static errno_t download_contents(void)
 		memset(&ds.count, 0, sizeof(ds.count));
 		content->hashalgo = hashalgo;
 
-		if (download_content(content, &ds) != 0)
+		if ((ret = download_content(&ds)) != 0)
 			break;
 	}
 
@@ -1211,6 +1414,10 @@ errno_t download_title(void)
 
 	if ((ret = download_init()) != 0)
 		return ret;
+
+	/* The -r option does *not* prevent redownloading tmd/cetk. Those are
+	 * small enough to fetch anew.
+	 */
 
 	if ((ret = download_tmd()) != 0)
 		return ret;
