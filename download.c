@@ -221,6 +221,12 @@ static errno_t write_file_from_memory(const char *filename,
 {
 	FILE *f;
 
+	/* We may get an attempt to write a 0-len cetk if we run with -m and
+	 * download a title that has no cetk.
+	 */
+	if (datalen == 0)
+		return 0;
+
 	if ((f = fopen(filename, "wb")) == NULL) {
 		err("Unable to open %s for writing: %s", filename,
 				strerror(errno));
@@ -558,6 +564,7 @@ static errno_t download_cetk(void)
 {
 	struct DownloadState ds = {.flags = 0};
 	CURLcode code;
+	long response_code;
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
 			get_cetk_url())) != CURLE_OK) {
@@ -586,9 +593,32 @@ static errno_t download_cetk(void)
 		msg("Downloading CETK...");
 
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
-		err("curl_easy_perform(cetk): %s",
-				curlerrstr(code));
-		return -1;
+		/* We may be downloading a cetk due to -m, despite not wanting
+		 * to decrypt the title. However, this operation can, of course,
+		 * fail for titles that don't have cetk.
+		 *
+		 * Check if the failure is just a 404 (and not, say, a network
+		 * problem) and if we don't *need* the cetk.
+		 */
+		if ((code = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE,
+						&response_code)) != CURLE_OK) {
+			err("curl_easy_getinfo(cetk): %s",
+					curlerrstr(code));
+			return -1;
+		}
+
+		if (response_code != 404
+				|| (opts.flags & OPT_DECRYPT_FROM_CETK)) {
+			err("curl_easy_perform(cetk): %s",
+					curlerrstr(code));
+			return -1;
+		}
+
+		/* If we did fail but fallthrough, the progress bar will
+		 * break the output on failure.
+		 */
+		if (opts.flags & OPT_SHOW_PROGRESS)
+			printf("\n");
 	}
 
 	if (ds.flags & DS_ERROR)
