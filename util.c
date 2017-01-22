@@ -336,3 +336,26 @@ uint8_t util_get_msb64(uint64_t i)
 	return msb;
 }
 
+__attribute__((format(printf, 3, 4))) char *util_realloc_and_append_fmt(
+		char *base, size_t appendlen, const char *fmt, ...)
+{
+	size_t newlen, baselen;
+	int res;
+	char *newbuf;
+	va_list ap;
+
+	baselen = strlen(base);
+	newlen = baselen + appendlen;
+
+	if ((newbuf = realloc(base, newlen + 1)) == NULL) {
+		free(base);
+		return NULL;
+	}
+
+	va_start(ap, fmt);
+	vsprintf(newbuf + baselen, fmt, ap);
+	va_end(ap);
+
+	return newbuf;
+}
+

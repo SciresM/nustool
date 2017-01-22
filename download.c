@@ -1,5 +1,5 @@
 #ifdef __WIN32
- #define CURL_STATICLIB
+	#define CURL_STATICLIB
 #endif
 
 #include <curl/curl.h>
@@ -16,15 +16,13 @@
 #include "util.h"
 
 #ifdef _WIN32
-    #define CURL_INIT_VARS CURL_GLOBAL_WIN32
+	#define CURL_INIT_VARS CURL_GLOBAL_WIN32
 #else
-    #define CURL_INIT_VARS CURL_GLOBAL_NOTHING
+	#define CURL_INIT_VARS CURL_GLOBAL_NOTHING
 #endif
 
 static CURL *curl;
 static char errbuf[CURL_ERROR_SIZE];
-/* "http://nus.cdn.c.shop.nintendowifi.net/ccs/download/0000000000000000/00000000.h3" + '\0' */
-static char urlbuf[81];
 
 static byte *tmd = NULL;
 static size_t tmdsize;
@@ -41,57 +39,78 @@ static const char *curlerrstr(CURLcode code)
 		return curl_easy_strerror(code);
 }
 
+static const char *get_cdn_base_url(void)
+{
+	const char *ret;
+
+	if ((ret = getenv("NUSTOOL_BASE_URL")) == NULL)
+		ret = DEFAULT_NUS_BASE_URL;
+
+	return ret;
+}
+
 static char *get_base_url_for_titleid(uint64_t titleid)
 {
-	strcpy(urlbuf, NUS_BASE_URL);
+	size_t len;
+	const char *baseurl;
+	char *urlbuf;
 
-	snprintf(urlbuf + NUS_BASE_URL_LEN, sizeof(urlbuf) - NUS_BASE_URL_LEN,
-			"%016" PRIx64 "/", titleid);
+	baseurl = get_cdn_base_url();
 
-	return urlbuf;
-}
+	/* baseurl + "/0000000000000000/" */
+	len = strlen(baseurl) + 18;
 
-static const char *get_tmd_url(void)
-{
-	strcat(get_base_url_for_titleid(opts.titleid), "tmd");
+	urlbuf = malloc(len + 1);
 
-	if (!(opts.flags & OPT_HAS_VERSION))
-		return urlbuf;
-
-	snprintf(urlbuf + NUS_TMD_NOVER_URL_LEN,
-			sizeof(urlbuf) - NUS_TMD_NOVER_URL_LEN,
-			".%" PRIu16, opts.version);
+	sprintf(urlbuf, "%s/%016" PRIx64 "/", baseurl, titleid);
 
 	return urlbuf;
 }
 
-static const char *get_cetk_url(void)
+static char *get_tmd_url(void)
 {
-	strcat(get_base_url_for_titleid(opts.titleid), "cetk");
+	char *urlbuf;
 
-	return urlbuf;
+	if ((urlbuf = get_base_url_for_titleid(opts.titleid)) == NULL)
+		return NULL;
+
+	if (opts.flags & OPT_HAS_VERSION)
+		return util_realloc_and_append_fmt(urlbuf, 9, "tmd.%" PRIu16,
+				opts.version);
+	else
+		return util_realloc_and_append_fmt(urlbuf, 3, "%s", "tmd");
 }
 
-static const char *get_content_url(const struct Content *content)
+static char *get_cetk_url(void)
 {
-	(void)get_base_url_for_titleid(opts.titleid);
+	char *urlbuf;
 
-	snprintf(urlbuf + NUS_TITLE_BASE_URL_LEN,
-			sizeof(urlbuf) - NUS_TITLE_BASE_URL_LEN,
-			"%08" PRIx32, content->contentid);
+	if ((urlbuf = get_base_url_for_titleid(opts.titleid)) == NULL)
+		return NULL;
 
-	return urlbuf;
+	return util_realloc_and_append_fmt(urlbuf, 4, "%s", "cetk");
 }
 
-static const char *get_h3_url_for_content(const struct Content *content)
+static char *get_content_url(const struct Content *content)
 {
-	(void)get_base_url_for_titleid(opts.titleid);
+	char *urlbuf;
 
-	snprintf(urlbuf + NUS_TITLE_BASE_URL_LEN,
-			sizeof(urlbuf) - NUS_TITLE_BASE_URL_LEN,
-			"%08" PRIx32 ".h3", content->contentid);
+	if ((urlbuf = get_base_url_for_titleid(opts.titleid)) == NULL)
+		return NULL;
 
-	return urlbuf;
+	return util_realloc_and_append_fmt(urlbuf, 8, "%08" PRIx32,
+			content->contentid);
+}
+
+static char *get_h3_url_for_content(const struct Content *content)
+{
+	char *urlbuf;
+
+	if ((urlbuf = get_base_url_for_titleid(opts.titleid)) == NULL)
+		return NULL;
+
+	return util_realloc_and_append_fmt(urlbuf, 11, "%08" PRIx32 ".h3",
+			content->contentid);
 }
 
 
@@ -352,11 +371,17 @@ static errno_t download_tmd(void)
 {
 	struct DownloadState ds = {.flags = 0};
 	CURLcode code;
+	char *url;
 
-	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
-			get_tmd_url())) != CURLE_OK) {
+	if ((url = get_tmd_url()) == NULL) {
+		oom();
+		return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:tmd): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -364,6 +389,7 @@ static errno_t download_tmd(void)
 			!= CURLE_OK) {
 		err("curl_easy_setopt(WRITEDATA): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -371,6 +397,7 @@ static errno_t download_tmd(void)
 					download_tmd_cb)) != CURLE_OK) {
 		err("curl_easy_setopt(WRITEFUNCTION): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -382,8 +409,11 @@ static errno_t download_tmd(void)
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
 		err("curl_easy_perform(tmd): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
+
+	free(url);
 
 	if (ds.flags & DS_ERROR)
 		return -1;
@@ -645,11 +675,17 @@ static errno_t download_cetk(void)
 	struct DownloadState ds = {.flags = 0};
 	CURLcode code;
 	long response_code;
+	char *url;
 
-	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
-			get_cetk_url())) != CURLE_OK) {
+	if ((url = get_cetk_url()) == NULL) {
+		oom();
+		return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:cetk): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -657,6 +693,7 @@ static errno_t download_cetk(void)
 			!= CURLE_OK) {
 		err("curl_easy_setopt(WRITEDATA): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -664,6 +701,7 @@ static errno_t download_cetk(void)
 					download_cetk_cb)) != CURLE_OK) {
 		err("curl_easy_setopt(WRITEFUNCTION): %s",
 				curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -673,6 +711,8 @@ static errno_t download_cetk(void)
 		msg("Downloading CETK...");
 
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
+		free(url);
+
 		/* We may be downloading a cetk due to -m, despite not wanting
 		 * to decrypt the title. However, this operation can, of course,
 		 * fail for titles that don't have cetk.
@@ -700,6 +740,8 @@ static errno_t download_cetk(void)
 		if (opts.flags & OPT_SHOW_PROGRESS)
 			printf("\n");
 	}
+
+	free(url);
 
 	if (ds.flags & DS_ERROR)
 		return -1;
@@ -1129,6 +1171,7 @@ static errno_t download_and_verify_h3(struct Content *content)
 {
 	CURLcode code;
 	byte digest[0x20];
+	char *url;
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_WRITEDATA, content))
 			!= CURLE_OK) {
@@ -1145,10 +1188,15 @@ static errno_t download_and_verify_h3(struct Content *content)
 		return -1;
 	}
 
-	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
-			get_h3_url_for_content(content))) != CURLE_OK) {
+	if ((url = get_h3_url_for_content(content)) == NULL) {
+		oom();
+		return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:%08" PRIx32 ".h3): %s",
 				content->contentid, curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -1161,8 +1209,11 @@ static errno_t download_and_verify_h3(struct Content *content)
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
 		err("curl_easy_perform(%08" PRIx32 ".h3): %s",
 				content->contentid, curlerrstr(code));
+		free(url);
 		return -1;
 	}
+
+	free(url);
 
 	gcry_md_hash_buffer(content->hashalgo, digest, content->h3,
 			gcry_md_get_algo_dlen(content->hashalgo));
@@ -1306,6 +1357,7 @@ static errno_t download_content(struct DownloadState *ds)
 	uint64_t filelen;
 	char filename[9];
 	CURLcode code;
+	char *url;
 
 	snprintf(filename, sizeof(filename), "%08x", ds->content->contentid);
 
@@ -1332,10 +1384,15 @@ static errno_t download_content(struct DownloadState *ds)
 			return -1;
 	}
 
-	if ((code = curl_easy_setopt(curl, CURLOPT_URL,
-			get_content_url(ds->content))) != CURLE_OK) {
+	if ((url = get_content_url(ds->content)) == NULL) {
+		oom();
+		return -1;
+	}
+
+	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
 				ds->content->contentid, curlerrstr(code));
+		free(url);
 		return -1;
 	}
 
@@ -1343,6 +1400,7 @@ static errno_t download_content(struct DownloadState *ds)
 			!= CURLE_OK) {
 		err("curl_easy_setopt(WRITEDATA): %s",
 				curlerrstr(code));
+		free(url);
 		fclose(f);
 		return -1;
 	}
@@ -1352,6 +1410,7 @@ static errno_t download_content(struct DownloadState *ds)
 			!= CURLE_OK) {
 		err("curl_easy_setopt(WRITEFUNCTION): %s",
 				curlerrstr(code));
+		free(url);
 		fclose(f);
 		return -1;
 	}
@@ -1388,9 +1447,12 @@ static errno_t download_content(struct DownloadState *ds)
 	if ((code = curl_easy_perform(curl)) != CURLE_OK) {
 		err("curl_easy_perform(%08" PRIx32 "): %s",
 				ds->content->contentid, curlerrstr(code));
+		free(url);
 		fclose(f);
 		return -1;
 	}
+
+	free(url);
 
 	/* The number of bytes to resume from persists between individual
 	 * URLs; we need to reset it to 0 after a completed transfer.

@@ -6,21 +6,13 @@
 #include "crypto.h"
 #include "types.h"
 
-#define NUS_BASE_URL		"http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/"
-/* "http://nus.cdn.c.shop.nintendowifi.net/ccs/download/" */
-#define NUS_BASE_URL_LEN	52
-/* "http://nus.cdn.c.shop.nintendowifi.net/ccs/download/0000000000000000/" */
-#define NUS_TITLE_BASE_URL_LEN	69
-/* "http://nus.cdn.c.shop.nintendowifi.net/ccs/download/0000000000000000/tmd" */
-#define NUS_TMD_NOVER_URL_LEN	72
+#define DEFAULT_NUS_BASE_URL	"http://ccs.cdn.c.shop.nintendowifi.net/ccs/download"
 
-errno_t download_title(void);
-
-#define DS_ERROR	(1UL << 31)
+#define DS_ERROR		(1UL << 31)
 /* Do not write to file; switch CBC mode to encrypt. Used to restore state from
  * an aborted download.
  */
-#define DS_RESUMING	(1UL << 30)
+#define DS_RESUMING		(1UL << 30)
 
 #define TYPE_ENCRYPTED		(1U <<  0)
 /* aka type "disc" */
@@ -101,6 +93,8 @@ static inline bool has_simple_crypto(const struct Content *content)
 	return ((content->type & TYPE_ENCRYPTED)
 		&& !(content->type & TYPE_BLOCKWISECRYPTO));
 }
+
+errno_t download_title(void);
 
 #endif
 

@@ -37,6 +37,12 @@ Copy `config.mk.template` to `config.mk` and then run `make`.
 To build under windows, you will need to build [libcurl](https://curl.haxx.se/libcurl/), [libgpgerror](https://www.gnupg.org/(fr)/related_software/libgpg-error/index.html),
 and [libgcrypt](https://www.gnu.org/software/libgcrypt/). I recommend using MinGW.
 
+## Environment Variables
+
+You can set the NUSTOOL\_BASE\_URL environment variable to point to a different
+CDN (e.g. for a local mirror). If not set, it'll default to
+`http://ccs.cdn.c.shop.nintendowifi.net/ccs/download`.
+
 ## Examples
 
 ### Downloading the raw encrypted contents of title 0004001b00010002
