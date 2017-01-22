@@ -30,6 +30,7 @@ static byte *tmd = NULL;
 static size_t tmdsize;
 static byte *cetk = NULL;
 static size_t cetksize;
+static uint8_t common_key_index;
 static struct Content *contents = NULL;
 
 static const char *curlerrstr(CURLcode code)
@@ -393,36 +394,112 @@ static errno_t download_tmd(void)
 	return 0;
 }
 
-static inline const byte *get_common_key_from_tid(uint64_t titleid)
+static inline const byte *get_common_keyY_ctr(uint64_t titleid, bool is_retail)
 {
-	static const byte wii_ckey[16] = {
+	/* The 3DS uses a field in the ticket to determine which keyY to use.
+	 *
+	 * Normally, only 0 (application, e.g. from eShop) and 1 (system title)
+	 * are used. Appearances of the other keyYs haven't been spotted.
+	 *
+	 * However, we may be provided the encrypted titlekey from -K only. In
+	 * that case, we have no ticket, so we'll just test if TIDhigh bit 0x10,
+	 * which indicates a system title, is set.
+	 */
+	static const byte ctr_ckeyYs[6][16] = {
+		{0xd0, 0x7b, 0x33, 0x7f, 0x9c, 0xa4, 0x38, 0x59, 0x32, 0xa2, 0xe2, 0x57, 0x23, 0x23, 0x2e, 0xb9},
+		{0x0c, 0x76, 0x72, 0x30, 0xf0, 0x99, 0x8f, 0x1c, 0x46, 0x82, 0x82, 0x02, 0xfa, 0xac, 0xbe, 0x4c},
+		{0xc4, 0x75, 0xcb, 0x3a, 0xb8, 0xc7, 0x88, 0xbb, 0x57, 0x5e, 0x12, 0xa1, 0x09, 0x07, 0xb8, 0xa4},
+		{0xe4, 0x86, 0xee, 0xe3, 0xd0, 0xc0, 0x9c, 0x90, 0x2f, 0x66, 0x86, 0xd4, 0xc0, 0x6f, 0x64, 0x9f},
+		{0xed, 0x31, 0xba, 0x9c, 0x04, 0xb0, 0x67, 0x50, 0x6c, 0x44, 0x97, 0xa3, 0x5b, 0x78, 0x04, 0xfc},
+		{0x5e, 0x66, 0x99, 0x8a, 0xb4, 0xe8, 0x93, 0x16, 0x06, 0x85, 0x0f, 0xd7, 0xa1, 0x6d, 0xd7, 0x55}
+	};
+	/* Titles that use keyY#0 (application) use a different keyY in the
+	 * development environment.
+	 *
+	 * (Technically, the 3DS firmware uses a hardcoded normalkey, rather
+	 * than computing it from keyX and keyY, but we do it differently here
+	 * for the sake of having less branching.)
+	 */
+	static const byte ctr_ckeyY_dev_app[16] = {
+		0x85, 0x21, 0x5e, 0x96, 0xcb, 0x95, 0xa9, 0xec, 0xa4, 0xb4, 0xde, 0x60, 0x1c, 0xb5, 0x62, 0xc7
+	};
+
+	if (cetksize == 0) {
+		if ((titleid >> 32) & 0x10)
+			common_key_index = 1;
+		else
+			common_key_index = 0;
+	}
+
+	if (common_key_index > 5) {
+		err("Error: Unknown 3DS common keyY index %" PRIu8 "?!",
+				common_key_index);
+		return NULL;
+	}
+
+	if (!is_retail && common_key_index == 0)
+		return ctr_ckeyY_dev_app;
+	else
+		return ctr_ckeyYs[common_key_index];
+}
+
+static inline const byte *get_common_key_ctr(uint64_t titleid,
+		bool is_retail)
+{
+	/* missing: ctr_ckeyX_retail */
+	static const byte ctr_ckeyX_dev[16] = {
+		0xbd, 0x4f, 0xe7, 0xe7, 0x33, 0xc7, 0x55, 0xfc, 0xe7, 0x54, 0x0e, 0xab, 0xbd, 0x8a, 0xc3, 0x0d
+	};
+
+	static byte ckey[16];
+	const byte *keyY;
+
+	if (is_retail)
+		/* Fuck you, 3DS bootroms. */
+		return NULL;
+
+	if ((keyY = get_common_keyY_ctr(titleid, is_retail)) == NULL)
+		return NULL;
+
+	return crypto_ctr_key_scramble(ckey, ctr_ckeyX_dev, keyY);
+}
+
+static inline const byte *get_common_key(uint64_t titleid, bool is_retail)
+{
+	static const byte wii_ckey_retail[16] = {
 		0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7
 	};
-	static const byte dsi_ckey[16] = {
+	static const byte dsi_ckey_retail[16] = {
 		0xaf, 0x1b, 0xf5, 0x16, 0xa8, 0x07, 0xd2, 0x1a, 0xea, 0x45, 0x98, 0x4f, 0x04, 0x74, 0x28, 0x61
 	};
-	static const byte wiiu_ckey[16] = {
-		0xd7, 0xB0, 0x04, 0x02, 0x65, 0x9b, 0xa2, 0xab, 0xd2, 0xcb, 0x0d, 0xb2, 0x7f, 0xa2, 0xb6, 0x56
+	static const byte wiiu_ckey_retail[16] = {
+		0xd7, 0xb0, 0x04, 0x02, 0x65, 0x9b, 0xa2, 0xab, 0xd2, 0xcb, 0x0d, 0xb2, 0x7f, 0xa2, 0xb6, 0x56
+	};
+	static const byte wii_ckey_dev[16] = {
+		0xa1, 0x60, 0x4a, 0x6a, 0x71, 0x23, 0xb5, 0x29, 0xae, 0x8b, 0xec, 0x32, 0xc8, 0x16, 0xfc, 0xaa
+	};
+	static const byte wiiu_ckey_dev[16] = {
+		0x2f, 0x5c, 0x1b, 0x29, 0x44, 0xe7, 0xfd, 0x6f, 0xc3, 0x97, 0x96, 0x4b, 0x05, 0x76, 0x91, 0xfa
 	};
 
 	switch (titleid >> 48) {
 	/* Wii */
 	case 0x0000:
 	case 0x0001:
-		return wii_ckey;
+		return (is_retail ? wii_ckey_retail : wii_ckey_dev);
 	/* Unknown, maybe reserved for DS? */
 	case 0x0002:
 		return NULL;
 	/* DSi */
 	case 0x0003:
-		return dsi_ckey;
+		/* DSi and Wii share their dev common keys. */
+		return (is_retail ? dsi_ckey_retail : wii_ckey_dev);
 	/* 3DS */
 	case 0x0004:
-		/* Fuck you, 3DS bootroms. */
-		return NULL;
+		return get_common_key_ctr(titleid, is_retail);
 	/* Wii U */
 	case 0x0005:
-		return wiiu_ckey;
+		return (is_retail ? wiiu_ckey_retail : wiiu_ckey_dev);
 	}
 
 	return NULL;
@@ -443,7 +520,8 @@ static errno_t decrypt_titlekey(void)
 		return -1;
 	}
 
-	if ((common_key = get_common_key_from_tid(opts.titleid)) == NULL) {
+	if ((common_key = get_common_key(opts.titleid,
+					!(opts.flags & OPT_DEV_KEYS))) == NULL) {
 		err("Error: Missing common key (unsupported/unknown platform).");
 		return -1;
 	}
@@ -513,6 +591,8 @@ static errno_t parse_cetk(void)
 
 	opts.titleid = titleid;
 	memcpy(opts.key, cetk + offset + 0x7f, sizeof(opts.key));
+
+	common_key_index = cetk[offset + 0xb1];
 
 	return 0;
 }

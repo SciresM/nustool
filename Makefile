@@ -9,8 +9,10 @@ all: nustool
 .c.o:
 	$(CC) -c $(CFLAGS) -o $@ $<
 
-nustool: main.o download.o util.o
+nustool: crypto.o main.o download.o util.o
 	$(CC) -o $@ $^ $(LDFLAGS)
+
+crypto.o: crypto.h types.h
 
 main.o: main.c download.h types.h util.h
 

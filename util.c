@@ -44,7 +44,8 @@ __attribute__((format(printf, 1, 2))) void msg(const char *fmt, ...)
 
 static void usage(const char *name)
 {
-	err("Usage: %s [-cmpr] [-k decrypted_key] [-K encrypted_key] [-V version] titleid",
+	err("Usage: %s [-cDmpr] [-k decrypted_key] [-K encrypted_key]\n"
+			"       [-V version] titleid",
 	/* The C standard does not guarantee that argv[0] is non-NULL, but does
 	 * guarantee that argv[argc] is NULL.
 	 *
@@ -60,6 +61,8 @@ static void help(const char *name)
 	err("\nDownloads and optionally decrypts a title from NUS.\n"
 	"\n"
 	" -c              try to decrypt the title using the CETK key\n"
+	" -D              if decrypting the title using the CETK key, use the\n"
+	"                 development common key to decrypt the titlekey\n"
 	" -k [key]        the titlekey to use to decrypt the contents\n"
 	" -K [key]        the encrypted titlekey to use to decrypt the contents\n"
 	" -h              print this help and exit\n"
@@ -70,7 +73,7 @@ static void help(const char *name)
 	" -V [version]    the version of the title to download; if not given,\n"
 	"                 the latest version will be downloaded\n"
 	"\n"
-	"If none of -c, -k and -K are given, the raw encrypted contents\n"
+	"If none of -c, -D, -k and -K are given, the raw encrypted contents\n"
 	"will be downloaded.\n"
 	"\n"
 	"All files are downloaded into the current directory.");
@@ -199,11 +202,14 @@ errno_t util_parse_options(int argc, char *argv[])
 	/* Invalid titleid for verification if it's been set */
 	opts.titleid = 0xFFFFFFFFFFFFFFFFULL;
 
-	while ((flag = getopt(argc, argv, "ck:K:mprV:")) != -1) {
+	while ((flag = getopt(argc, argv, "cDk:K:mprV:")) != -1) {
 		switch (flag) {
+		case 'D':
+			opts.flags |= OPT_DEV_KEYS;
+			break;
 		case 'c':
 			if (opts.flags & OPT_HAS_KEY) {
-				err("You cannot specify -k/-K and -c together.");
+				err("You cannot specify -k/-K and -c/-D together.");
 				return -1;
 			}
 

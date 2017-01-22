@@ -10,6 +10,7 @@
 #define OPT_KEY_ENCRYPTED	(1UL << 4)
 #define OPT_KEEP_META		(1UL << 5)
 #define OPT_RESUME		(1UL << 6)
+#define OPT_DEV_KEYS		(1UL << 7)
 
 struct Options {
 	uint64_t titleid;

@@ -6,11 +6,14 @@ Servers (NUS).
 ## Usage
 
 ```
-Usage: nustool [-cmpr] [-k decrypted_key] [-K encrypted_key] [-V version] titleid
+Usage: nustool [-cDmpr] [-k decrypted_key] [-K encrypted_key]
+       [-V version] titleid
 
 Downloads and optionally decrypts a title from NUS.
 
  -c              try to decrypt the title using the CETK key
+ -D              if decrypting the title using the CETK key, use the
+                 development common key to decrypt the titlekey
  -k [key]        the titlekey to use to decrypt the contents
  -K [key]        the encrypted titlekey to use to decrypt the contents
  -h              print this help and exit
