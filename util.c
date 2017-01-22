@@ -14,6 +14,12 @@
 #include "util.h"
 #include "version.h"
 
+#ifdef _WIN32
+	#define __mkdir(A, B) _mkdir(A)
+#else
+	#define __mkdir(A, B) mkdir(A, B)
+#endif
+
 __attribute__((noreturn)) void oom(void)
 {
 	fputs("Out of memory.", stderr);
@@ -67,6 +73,7 @@ static void help(const char *name)
 	" -K [key]        the encrypted titlekey to use to decrypt the contents\n"
 	" -h              print this help and exit\n"
 	" -m              keep meta files (cetk, tmd); usable with make_cdn_cia\n"
+	" -l              download files to local directory instead of /tid/vers/\n"
 	" -p              show progress bars\n"
 	" -r              resume download\n"
 	" -v              print nustool version and exit\n"
@@ -139,6 +146,40 @@ errno_t util_parse_hex(char *in, byte *out, size_t outlen)
 	return 0;
 }
 
+errno_t util_create_outdir(void)
+{
+	if (opts.flags & OPT_LOCAL_FILES)
+		return 0;
+
+	char *dir = (char *)calloc(MAX_FILEPATH_LEN, sizeof(char));
+
+	snprintf(dir, MAX_FILEPATH_LEN, "%016" PRIx64, opts.titleid);
+	if (__mkdir(dir, 0777) == -1 && errno != EEXIST) {
+		free(dir);
+		return -1;
+	}
+
+	snprintf(dir + strlen(dir), MAX_FILEPATH_LEN - strlen(dir), "/%" PRIu16, opts.version);
+	if (__mkdir(dir, 0777) == -1 && errno != EEXIST) {
+		free(dir);
+		return -1;
+	}
+
+	free(dir);
+	return 0;
+}
+
+char *util_get_filepath(const char *path)
+{
+	char *filepath = (char *)calloc(MAX_FILEPATH_LEN, sizeof(char));
+
+	if (!(opts.flags & OPT_LOCAL_FILES))
+		snprintf(filepath, MAX_FILEPATH_LEN - MAX_FILENAME_LEN, "%016" PRIx64 "/%" PRIu16 "/", opts.titleid, opts.version);
+	snprintf(filepath + strlen(filepath), MAX_FILENAME_LEN, "%s", path);
+
+	return filepath;
+}
+
 const char *util_print_hex(const byte bytes[], size_t length, char *out)
 {
 	static const char *hex_str = "0123456789abcdef";
@@ -202,7 +243,7 @@ errno_t util_parse_options(int argc, char *argv[])
 	/* Invalid titleid for verification if it's been set */
 	opts.titleid = 0xFFFFFFFFFFFFFFFFULL;
 
-	while ((flag = getopt(argc, argv, "cDk:K:mprV:")) != -1) {
+	while ((flag = getopt(argc, argv, "cDk:K:lmprV:")) != -1) {
 		switch (flag) {
 		case 'D':
 			opts.flags |= OPT_DEV_KEYS;
@@ -238,6 +279,10 @@ errno_t util_parse_options(int argc, char *argv[])
 
 			opts.flags |= OPT_HAS_KEY;
 
+			break;
+
+		case 'l':
+			opts.flags |= OPT_LOCAL_FILES;
 			break;
 
 		case 'm':

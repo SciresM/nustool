@@ -3,6 +3,8 @@
 #endif
 
 #include <curl/curl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -158,6 +160,12 @@ static errno_t download_init(void)
 		return -1;
 	}
 
+	/* Create output directory, if relevant. */
+	if (!(opts.flags & OPT_LOCAL_FILES) && util_create_outdir() != 0) {
+		err("Failed to create output directory");
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -241,21 +249,25 @@ static errno_t write_file_from_memory(const char *filename,
 {
 	FILE *f;
 
+	char *filepath = util_get_filepath(filename);
+
 	/* We may get an attempt to write a 0-len cetk if we run with -m and
 	 * download a title that has no cetk.
 	 */
 	if (datalen == 0)
 		return 0;
 
-	if ((f = fopen(filename, "wb")) == NULL) {
-		err("Unable to open %s for writing: %s", filename,
+	if ((f = fopen(filepath, "wb")) == NULL) {
+		err("Unable to open %s for writing: %s", filepath,
 				strerror(errno));
+		free(filepath);
 		return -1;
 	}
 
 	fwrite(data, datalen, 1, f);
 
 	fclose(f);
+	free(filepath);
 
 	return 0;
 }
@@ -1265,15 +1277,17 @@ static errno_t read_partial_file_into_state(struct DownloadState *ds)
 	size_t bytes_read;
 	size_t filelen;
 	char filename[9];
+	char *filepath;
 
 	snprintf(filename, sizeof(filename), "%08x", ds->content->contentid);
+	filepath = util_get_filepath(filename);
 
 	/* File not being found is *not* okay -- we may have just created it
 	 * with the fopen(..., "w+b") call in download_content().
 	 *
 	 * File being empty, however, is.
 	 */
-	if (util_get_file_size(filename, &filelen) != 0)
+	if (util_get_file_size(filepath, &filelen) != 0)
 		return -1;
 
 	if (filelen == 0)
@@ -1358,34 +1372,42 @@ static errno_t download_content(struct DownloadState *ds)
 	char filename[9];
 	CURLcode code;
 	char *url;
+	char *filepath;
 
 	snprintf(filename, sizeof(filename), "%08x", ds->content->contentid);
+
+	filepath = util_get_filepath(filename);
 
 	errno = 0;
 	/* Since r+b won't create the file, but we need the file pointer at the
 	 * beginning of the file, we'll just manually create the file.
 	 */
-	if (util_create_file(filename) != 0) {
-		err("Unable to create file %s: %s", filename, strerror(errno));
+	if (util_create_file(filepath) != 0) {
+		err("Unable to create file %s: %s", filepath, strerror(errno));
+		free(filepath);
 		return -1;
 	}
 
 	errno = 0;
-	if ((f = fopen(filename, "r+b")) == NULL) {
-		err("Unable to open %s for reading and writing: %s", filename,
+	if ((f = fopen(filepath, "r+b")) == NULL) {
+		err("Unable to open %s for reading and writing: %s", filepath,
 				strerror(errno));
+		free(filepath);
 		return -1;
 	}
 
 	ds->f = f;
 
 	if (opts.flags & OPT_HAS_KEY) {
-		if (prepare_crypto_for_download(ds) != 0)
+		if (prepare_crypto_for_download(ds) != 0) {
+			free(filepath);
 			return -1;
+		}
 	}
 
 	if ((url = get_content_url(ds->content)) == NULL) {
 		oom();
+		free(filepath);
 		return -1;
 	}
 
@@ -1393,6 +1415,7 @@ static errno_t download_content(struct DownloadState *ds)
 		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
 				ds->content->contentid, curlerrstr(code));
 		free(url);
+		free(filepath);
 		return -1;
 	}
 
@@ -1402,6 +1425,7 @@ static errno_t download_content(struct DownloadState *ds)
 				curlerrstr(code));
 		free(url);
 		fclose(f);
+		free(filepath);
 		return -1;
 	}
 
@@ -1412,6 +1436,7 @@ static errno_t download_content(struct DownloadState *ds)
 				curlerrstr(code));
 		free(url);
 		fclose(f);
+		free(filepath);
 		return -1;
 	}
 
@@ -1428,6 +1453,7 @@ static errno_t download_content(struct DownloadState *ds)
 		switch (read_partial_file_into_state(ds)) {
 		/* Download already complete */
 		case 1:
+			free(filepath);
 			return 0;
 
 		/* File partially downloaded; state has been read
@@ -1438,6 +1464,7 @@ static errno_t download_content(struct DownloadState *ds)
 
 		/* Some operation failed. */
 		default:
+			free(filepath);
 			return -1;
 		}
 	}
@@ -1449,6 +1476,7 @@ static errno_t download_content(struct DownloadState *ds)
 				ds->content->contentid, curlerrstr(code));
 		free(url);
 		fclose(f);
+		free(filepath);
 		return -1;
 	}
 
@@ -1461,12 +1489,13 @@ static errno_t download_content(struct DownloadState *ds)
 			!= CURLE_OK) {
 		err("curl_easy_setopt(URL:%08" PRIx32 "): %s",
 				ds->content->contentid, curlerrstr(code));
+		free(filepath);
 		return -1;
 	}
 
 	fclose(f);
 
-	if (util_get_file_size(filename, &filelen) == 0
+	if (util_get_file_size(filepath, &filelen) == 0
 			&& filelen != ds->content->size) {
 		err("Warning: File size mismatch (got %" PRIu64
 				" vs. expected %" PRIu64
@@ -1476,11 +1505,15 @@ static errno_t download_content(struct DownloadState *ds)
 				ds->content->contentid);
 	}
 
-	if (ds->flags & DS_ERROR)
+	if (ds->flags & DS_ERROR) {
+		free(filepath);
 		return -1;
+	}
 
-	if (!(opts.flags & OPT_HAS_KEY))
+	if (!(opts.flags & OPT_HAS_KEY)) {
+		free(filepath);
 		return 0;
+	}
 
 	/* TMD SHA-1/hash tree-based verification happened as part of the
 	 * decryption for blockwise crypto contents.
@@ -1494,6 +1527,7 @@ static errno_t download_content(struct DownloadState *ds)
 				!= 0) {
 			err("Error: Hash mismatch for content %08" PRIx32,
 					ds->content->contentid);
+			free(filepath);
 			return -1;
 		}
 	}
@@ -1501,6 +1535,7 @@ static errno_t download_content(struct DownloadState *ds)
 	gcry_cipher_reset(ds->cipher);
 	gcry_md_reset(ds->hasher);
 
+	free(filepath);
 	return 0;
 }
 

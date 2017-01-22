@@ -3,3 +3,4 @@ nustool
 nustool.exe
 *.o
 *.dll
+bin

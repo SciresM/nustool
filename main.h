@@ -11,6 +11,7 @@
 #define OPT_KEEP_META		(1UL << 5)
 #define OPT_RESUME		(1UL << 6)
 #define OPT_DEV_KEYS		(1UL << 7)
+#define OPT_LOCAL_FILES		(1UL << 8)
 
 struct Options {
 	uint64_t titleid;
