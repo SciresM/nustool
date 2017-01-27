@@ -751,9 +751,9 @@ static errno_t download_cetk(void)
 		 */
 		if (opts.flags & OPT_SHOW_PROGRESS)
 			printf("\n");
+	} else { /* Wrap free in else block to prevent doublefree on fallthrough. */
+		free(url);
 	}
-
-	free(url);
 
 	if (ds.flags & DS_ERROR)
 		return -1;
