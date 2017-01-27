@@ -3,7 +3,7 @@
 
 #include "types.h"
 
-#define MAX_FILEPATH_LEN (16+1+5+1+9)
+#define MAX_FILEPATH_LEN (16+1+6+1+9)
 #define MAX_FILENAME_LEN (9)
 
 void oom(void) __attribute__((noreturn));
