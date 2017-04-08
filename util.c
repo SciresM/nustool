@@ -15,9 +15,9 @@
 #include "version.h"
 
 #ifdef _WIN32
-	#define __mkdir(A, B) _mkdir(A)
+	#define MAKEDIR(A, B) _mkdir(A)
 #else
-	#define __mkdir(A, B) mkdir(A, B)
+	#define MAKEDIR(A, B) mkdir(A, B)
 #endif
 
 __attribute__((noreturn)) void oom(void)
@@ -73,7 +73,7 @@ static void help(const char *name)
 	" -K [key]        the encrypted titlekey to use to decrypt the contents\n"
 	" -h              print this help and exit\n"
 	" -m              keep meta files (cetk, tmd); usable with make_cdn_cia\n"
-	" -l              download files to local directory instead of /tid/vers/\n"
+	" -l              download files to local directory instead of tid/ver/\n"
 	" -p              show progress bars\n"
 	" -r              resume download\n"
 	" -v              print nustool version and exit\n"
@@ -83,7 +83,7 @@ static void help(const char *name)
 	"If none of -c, -D, -k and -K are given, the raw encrypted contents\n"
 	"will be downloaded.\n"
 	"\n"
-	"All files are downloaded into the current directory.");
+	"All files are downloaded into a titleid/version/ directory.");
 }
 
 static void version(void)
@@ -151,16 +151,16 @@ errno_t util_create_outdir(void)
 	if (opts.flags & OPT_LOCAL_FILES)
 		return 0;
 
-	char *dir = (char *)calloc(MAX_FILEPATH_LEN, sizeof(char));
+	char *dir = calloc(MAX_FILEPATH_LEN, sizeof(char));
 
 	snprintf(dir, MAX_FILEPATH_LEN, "%016" PRIx64, opts.titleid);
-	if (__mkdir(dir, 0777) == -1 && errno != EEXIST) {
+	if (MAKEDIR(dir, 0777) == -1 && errno != EEXIST) {
 		free(dir);
 		return -1;
 	}
 
 	snprintf(dir + strlen(dir), MAX_FILEPATH_LEN - strlen(dir), "/%" PRIu16, opts.version);
-	if (__mkdir(dir, 0777) == -1 && errno != EEXIST) {
+	if (MAKEDIR(dir, 0777) == -1 && errno != EEXIST) {
 		free(dir);
 		return -1;
 	}
@@ -171,7 +171,7 @@ errno_t util_create_outdir(void)
 
 char *util_get_filepath(const char *path)
 {
-	char *filepath = (char *)calloc(MAX_FILEPATH_LEN, sizeof(char));
+	char *filepath = calloc(MAX_FILEPATH_LEN, sizeof(char));
 
 	if (!(opts.flags & OPT_LOCAL_FILES))
 		snprintf(filepath, MAX_FILEPATH_LEN - MAX_FILENAME_LEN, "%016" PRIx64 "/%" PRIu16 "/", opts.titleid, opts.version);
@@ -243,7 +243,7 @@ errno_t util_parse_options(int argc, char *argv[])
 	/* Invalid titleid for verification if it's been set */
 	opts.titleid = 0xFFFFFFFFFFFFFFFFULL;
 
-	while ((flag = getopt(argc, argv, "cDk:K:lmprV:")) != -1) {
+	while ((flag = getopt(argc, argv, "cDhk:K:lmprvV:")) != -1) {
 		switch (flag) {
 		case 'D':
 			opts.flags |= OPT_DEV_KEYS;
@@ -385,7 +385,6 @@ __attribute__((format(printf, 3, 4))) char *util_realloc_and_append_fmt(
 		char *base, size_t appendlen, const char *fmt, ...)
 {
 	size_t newlen, baselen;
-	int res;
 	char *newbuf;
 	va_list ap;
 

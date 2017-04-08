@@ -12,7 +12,7 @@ static void rotl(byte *buf)
 	do {
 		set_carry = (buf[i - 1] & 0x80);
 
-		buf[i - 1] = (buf[i - 1] << 1) | carry;
+		buf[i - 1] = (byte)(buf[i - 1] << 1) | carry;
 
 		if (set_carry)
 			carry = 1;

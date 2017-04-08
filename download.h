@@ -84,6 +84,8 @@ enum SignatureTypeID {
 struct TMDFileFormat {
 	size_t ncontents_offset;
 	size_t contents_offset;
+	size_t title_version_offset;
+
 	size_t content_chunk_len;
 	size_t hash_len;
 };

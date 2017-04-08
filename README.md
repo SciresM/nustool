@@ -17,6 +17,7 @@ Downloads and optionally decrypts a title from NUS.
  -k [key]        the titlekey to use to decrypt the contents
  -K [key]        the encrypted titlekey to use to decrypt the contents
  -h              print this help and exit
+ -l              download files to local directory instead of /tid/ver/
  -m              keep meta files (cetk, tmd); usable with make_cdn_cia
  -p              show progress bars
  -r              resume download
@@ -27,7 +28,7 @@ Downloads and optionally decrypts a title from NUS.
 If none of -c, -k and -K are given, the raw encrypted contents
 will be downloaded.
 
-All files are downloaded into the current directory.
+All files are downloaded into a titleid/version directory.
 ```
 
 ## Building

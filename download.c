@@ -160,12 +160,6 @@ static errno_t download_init(void)
 		return -1;
 	}
 
-	/* Create output directory, if relevant. */
-	if (!(opts.flags & OPT_LOCAL_FILES) && util_create_outdir() != 0) {
-		err("Failed to create output directory");
-		return -1;
-	}
-
 	return 0;
 }
 
@@ -232,6 +226,7 @@ static struct TMDFileFormat tmd_format[] = {
 	{
 		.ncontents_offset = 0x9e,
 		.contents_offset = 0xa4,
+		.title_version_offset = 0x9c,
 		.content_chunk_len = 0x24,
 		.hash_len = 0x14
 	},
@@ -239,6 +234,7 @@ static struct TMDFileFormat tmd_format[] = {
 	{
 		.ncontents_offset = 0x9e,
 		.contents_offset = 0x9c4,
+		.title_version_offset = 0x9c,
 		.content_chunk_len = 0x30,
 		.hash_len = 0x20
 	}
@@ -254,8 +250,10 @@ static errno_t write_file_from_memory(const char *filename,
 	/* We may get an attempt to write a 0-len cetk if we run with -m and
 	 * download a title that has no cetk.
 	 */
-	if (datalen == 0)
+	if (datalen == 0) {
+		free(filepath);
 		return 0;
+	}
 
 	if ((f = fopen(filepath, "wb")) == NULL) {
 		err("Unable to open %s for writing: %s", filepath,
@@ -272,7 +270,7 @@ static errno_t write_file_from_memory(const char *filename,
 	return 0;
 }
 
-static errno_t build_contents_list(void)
+static errno_t build_contents_list_and_create_outdir(void)
 {
 	uint32_t sigtype = ((uint32_t)tmd[0] << 24) | ((uint32_t)tmd[1] << 16)
 		| ((uint32_t)tmd[2] << 8) | tmd[3];
@@ -281,6 +279,7 @@ static errno_t build_contents_list(void)
 	struct TMDFileFormat *format;
 	byte *ptr;
 	size_t ncontents;
+	uint16_t tver;
 
 	if ((offset = bytes_to_skip_for_signature(sigtype)) == -1) {
 		err("Error: Unknown signature type %" PRIx32, sigtype);
@@ -297,6 +296,21 @@ static errno_t build_contents_list(void)
 	}
 
 	format = &tmd_format[tmd[offset + 0x40]];
+
+	tver = (uint16_t)((tmd[(size_t)offset + format->title_version_offset]
+				<< 8)
+		| tmd[(size_t)offset + format->title_version_offset + 1]);
+
+	if (tver != opts.version && (opts.flags & OPT_HAS_VERSION))
+		err("Warning: TMD version does not match requested version!");
+
+	opts.version = tver;
+
+	/* Create output directory, if relevant. */
+	if (!(opts.flags & OPT_LOCAL_FILES) && util_create_outdir() != 0) {
+		err("Failed to create output directory");
+		return -1;
+	}
 
 	ncontents = ((size_t)tmd[(size_t)offset + format->ncontents_offset] << 8)
 		| tmd[(size_t)offset + format->ncontents_offset + 1];
@@ -385,10 +399,8 @@ static errno_t download_tmd(void)
 	CURLcode code;
 	char *url;
 
-	if ((url = get_tmd_url()) == NULL) {
+	if ((url = get_tmd_url()) == NULL)
 		oom();
-		return -1;
-	}
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:tmd): %s",
@@ -430,7 +442,7 @@ static errno_t download_tmd(void)
 	if (ds.flags & DS_ERROR)
 		return -1;
 
-	if (build_contents_list() != 0)
+	if (build_contents_list_and_create_outdir() != 0)
 		return -1;
 
 	return 0;
@@ -578,7 +590,7 @@ static errno_t decrypt_titlekey(void)
 	/* Title ID in big endian */
 	for (size_t i = 0; i < sizeof(opts.titleid); ++i) {
 		bits = (8 * (sizeof(opts.titleid) - 1 - i));
-		iv[i] = (opts.titleid & (0xFFLLU << bits)) >> bits;
+		iv[i] = (byte)((opts.titleid & (0xFFLLU << bits)) >> bits);
 	}
 
 	if ((gerr = gcry_cipher_setiv(cipher, iv, sizeof(iv))) != 0) {
@@ -628,7 +640,7 @@ static errno_t parse_cetk(void)
 	}
 
 	for (size_t i = 0; i < sizeof(titleid); ++i)
-		titleid |= (uint64_t)(cetk[offset + 0x9c +
+		titleid |= (uint64_t)(cetk[(size_t)offset + 0x9c +
 				sizeof(titleid) - 1 - i]) << (8 * i);
 
 	opts.titleid = titleid;
@@ -689,10 +701,8 @@ static errno_t download_cetk(void)
 	long response_code;
 	char *url;
 
-	if ((url = get_cetk_url()) == NULL) {
+	if ((url = get_cetk_url()) == NULL)
 		oom();
-		return -1;
-	}
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:cetk): %s",
@@ -1200,10 +1210,8 @@ static errno_t download_and_verify_h3(struct Content *content)
 		return -1;
 	}
 
-	if ((url = get_h3_url_for_content(content)) == NULL) {
+	if ((url = get_h3_url_for_content(content)) == NULL)
 		oom();
-		return -1;
-	}
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
 		err("curl_easy_setopt(URL:%08" PRIx32 ".h3): %s",
@@ -1406,9 +1414,8 @@ static errno_t download_content(struct DownloadState *ds)
 	}
 
 	if ((url = get_content_url(ds->content)) == NULL) {
-		oom();
 		free(filepath);
-		return -1;
+		oom();
 	}
 
 	if ((code = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
