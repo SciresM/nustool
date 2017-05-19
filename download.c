@@ -500,22 +500,20 @@ static inline const byte *get_common_keyY_ctr(uint64_t titleid, bool is_retail)
 static inline const byte *get_common_key_ctr(uint64_t titleid,
 		bool is_retail)
 {
-	/* missing: ctr_ckeyX_retail */
 	static const byte ctr_ckeyX_dev[16] = {
 		0xbd, 0x4f, 0xe7, 0xe7, 0x33, 0xc7, 0x55, 0xfc, 0xe7, 0x54, 0x0e, 0xab, 0xbd, 0x8a, 0xc3, 0x0d
+	};
+	static const byte ctr_ckeyX_retail[16] = {
+		0x61, 0x70, 0x85, 0x71, 0x9b, 0x7c, 0xfb, 0x31, 0x6d, 0xf4, 0xdf, 0x2e, 0x83, 0x62, 0xc6, 0xe2
 	};
 
 	static byte ckey[16];
 	const byte *keyY;
 
-	if (is_retail)
-		/* Fuck you, 3DS bootroms. */
-		return NULL;
-
 	if ((keyY = get_common_keyY_ctr(titleid, is_retail)) == NULL)
 		return NULL;
 
-	return crypto_ctr_key_scramble(ckey, ctr_ckeyX_dev, keyY);
+	return crypto_ctr_key_scramble(ckey, is_retail ? ctr_ckeyX_retail : ctr_ckeyX_dev, keyY);
 }
 
 static inline const byte *get_common_key(uint64_t titleid, bool is_retail)
