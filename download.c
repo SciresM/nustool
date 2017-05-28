@@ -877,7 +877,7 @@ static errno_t download_contents_cb_simple_crypto(
 	 * mode and feed the decrypted contents to the hasher.
 	 *
 	 * If we're resuming a download, we need to *encrypt* in CBC mode to
-	 * make sure we're continuing from the right IV, but thta breaks
+	 * make sure we're continuing from the right IV, but that breaks
 	 * dcc->data being plaintext, so we need to hash first and then encrypt.
 	 */
 #define HASH() do {\
