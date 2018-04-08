@@ -537,15 +537,15 @@ static inline const byte *get_common_key(uint64_t titleid, bool is_retail)
 		0xa2, 0xc8, 0x80, 0x41, 0xe2, 0x36, 0x73, 0x4b, 0x43, 0x6e, 0x76, 0x4b, 0xcb, 0x83, 0x0f, 0x61
 	};
 	
-	/* All the known titles on Acer's NUS have titleID-high of 0x00000006. */
-	if ((titleid >> 32) == 0x00000006) return acer_ckey;
+	uint16_t platform = ((titleid >> 48) & 0xffff);
+	if (platform == 0) platform = ((titleid >> 32) & 0xffff);
 
-	switch (titleid >> 48) {
+	switch (platform) {
 	/* Wii */
 	case 0x0000:
 	case 0x0001:
 		return (is_retail ? wii_ckey_retail : wii_ckey_dev);
-	/* Unknown, maybe reserved for DS? */
+	/* iQue NetCard (unreleased) */
 	case 0x0002:
 		return NULL;
 	/* DSi */
@@ -558,6 +558,9 @@ static inline const byte *get_common_key(uint64_t titleid, bool is_retail)
 	/* Wii U */
 	case 0x0005:
 		return (is_retail ? wiiu_ckey_retail : wiiu_ckey_dev);
+	/* Acer */
+	case 0x0006:
+		return acer_ckey;
 	}
 
 	return NULL;
@@ -1142,14 +1145,17 @@ static size_t download_contents_cb(char *ptr, size_t size, size_t nmemb,
 
 static inline int get_hash_algo_from_tid(uint64_t titleid)
 {
-	switch (titleid >> 48) {
+	uint16_t platform = ((titleid >> 48) & 0xffff);
+	if (platform == 0) platform = ((titleid >> 32) & 0xffff);
+
+	switch (platform) {
 	/* Wii */
 	case 0x0000:
 	case 0x0001:
 		return GCRY_MD_SHA1;
-	/* Unknown, maybe reserved for DS? */
+	/* iQue NetCard, unreleased */
 	case 0x0002:
-		return -1;
+		return GCRY_MD_SHA1;
 	/* DSi */
 	case 0x0003:
 		return GCRY_MD_SHA1;
@@ -1160,6 +1166,9 @@ static inline int get_hash_algo_from_tid(uint64_t titleid)
 	case 0x0005:
 		/* What the fuck? */
 		return GCRY_MD_SHA1;
+	/* Acer */
+	case 0x0006:
+		return GCRY_MD_SHA256;
 	}
 
 	return -1;
